@@ -42,6 +42,20 @@ export interface AIConfig {
   navigationName?: string;
 }
 
+// 密码过期时间单位
+export type PasswordExpiryUnit = 'day' | 'week' | 'month' | 'year' | 'permanent';
+
+// 密码过期时间配置
+export interface PasswordExpiryConfig {
+  value: number; // 数值
+  unit: PasswordExpiryUnit; // 单位
+}
+
+// 网站配置
+export interface WebsiteConfig {
+  passwordExpiry: PasswordExpiryConfig;
+}
+
 // 搜索模式类型
 export type SearchMode = 'internal' | 'external';
 
@@ -59,6 +73,7 @@ export interface ExternalSearchSource {
 export interface SearchConfig {
   mode: SearchMode;
   externalSources: ExternalSearchSource[];
+  selectedSource?: ExternalSearchSource | null; // 选中的搜索源
 }
 
 export const DEFAULT_CATEGORIES: Category[] = [

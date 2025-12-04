@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Save, Bot, Key, Globe, Sparkles, PauseCircle, Wrench, Box, Copy, Check, Settings } from 'lucide-react';
-import { AIConfig, LinkItem } from '../types';
+import { X, Save, Bot, Key, Globe, Sparkles, PauseCircle, Wrench, Box, Copy, Check, Settings, Clock } from 'lucide-react';
+import { AIConfig, LinkItem, PasswordExpiryConfig } from '../types';
 import { generateLinkDescription } from '../services/geminiService';
 
 interface SettingsModalProps {
@@ -11,13 +11,16 @@ interface SettingsModalProps {
   onSave: (config: AIConfig) => void;
   links: LinkItem[];
   onUpdateLinks: (links: LinkItem[]) => void;
+  passwordExpiryConfig: PasswordExpiryConfig;
+  onSavePasswordExpiry: (config: PasswordExpiryConfig) => void;
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ 
-    isOpen, onClose, config, onSave, links, onUpdateLinks 
+    isOpen, onClose, config, onSave, links, onUpdateLinks, passwordExpiryConfig, onSavePasswordExpiry
 }) => {
   const [activeTab, setActiveTab] = useState<'ai' | 'tools' | 'website'>('ai');
   const [localConfig, setLocalConfig] = useState<AIConfig>(config);
+  const [localPasswordExpiryConfig, setLocalPasswordExpiryConfig] = useState<PasswordExpiryConfig>(passwordExpiryConfig);
   
   // Bulk Generation State
   const [isProcessing, setIsProcessing] = useState(false);
@@ -35,6 +38,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setLocalConfig(config);
+      setLocalPasswordExpiryConfig(passwordExpiryConfig);
       setIsProcessing(false);
       setProgress({ current: 0, total: 0 });
       shouldStopRef.current = false;
@@ -42,14 +46,19 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
       const storedToken = localStorage.getItem('cloudnav_auth_token');
       if (storedToken) setPassword(storedToken);
     }
-  }, [isOpen, config]);
+  }, [isOpen, config, passwordExpiryConfig]);
 
   const handleChange = (key: keyof AIConfig, value: string) => {
     setLocalConfig(prev => ({ ...prev, [key]: value }));
   };
 
+  const handlePasswordExpiryChange = (key: keyof PasswordExpiryConfig, value: string | number) => {
+    setLocalPasswordExpiryConfig(prev => ({ ...prev, [key]: value }));
+  };
+
   const handleSave = () => {
     onSave(localConfig);
+    onSavePasswordExpiry(localPasswordExpiryConfig);
     onClose();
   };
 
@@ -452,6 +461,51 @@ document.addEventListener('DOMContentLoaded', async () => {
                                 />
                                 <p className="text-[10px] text-slate-400 mt-1">
                                     网站图标的 URL 地址
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="pt-6 border-t border-slate-200 dark:border-slate-700">
+                        <h4 className="font-bold dark:text-white mb-3 text-sm flex items-center gap-2">
+                            <Clock size={16} /> 密码过期时间设置
+                        </h4>
+                        <p className="text-xs text-slate-500 mb-4">
+                            配置访问密码的过期时间，提高安全性。设置为"永久"则密码不会过期。
+                        </p>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-medium text-slate-500 mb-1">
+                                    过期时间数值
+                                </label>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    value={localPasswordExpiryConfig.value}
+                                    onChange={(e) => handlePasswordExpiryChange('value', parseInt(e.target.value) || 1)}
+                                    className="w-full p-2.5 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                />
+                                <p className="text-[10px] text-slate-400 mt-1">
+                                    密码过期的具体数值
+                                </p>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-slate-500 mb-1">
+                                    过期时间单位
+                                </label>
+                                <select
+                                    value={localPasswordExpiryConfig.unit}
+                                    onChange={(e) => handlePasswordExpiryChange('unit', e.target.value)}
+                                    className="w-full p-2.5 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                >
+                                    <option value="day">天</option>
+                                    <option value="week">周</option>
+                                    <option value="month">月</option>
+                                    <option value="year">年</option>
+                                    <option value="permanent">永久</option>
+                                </select>
+                                <p className="text-[10px] text-slate-400 mt-1">
+                                    选择密码过期的时间单位
                                 </p>
                             </div>
                         </div>

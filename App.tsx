@@ -24,7 +24,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { LinkItem, Category, DEFAULT_CATEGORIES, INITIAL_LINKS, WebDavConfig, AIConfig, SearchMode, ExternalSearchSource, SearchConfig } from './types';
+import { LinkItem, Category, DEFAULT_CATEGORIES, INITIAL_LINKS, WebDavConfig, AIConfig, SearchMode, ExternalSearchSource, SearchConfig, PasswordExpiryConfig } from './types';
 import { parseBookmarks } from './services/bookmarkParser';
 import Icon from './components/Icon';
 import LinkModal from './components/LinkModal';
@@ -151,6 +151,25 @@ function App() {
   // Mobile Search State
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   
+  // Category Action Auth State
+  const [categoryActionAuth, setCategoryActionAuth] = useState<{
+    isOpen: boolean;
+    action: 'edit' | 'delete';
+    categoryId: string;
+    categoryName: string;
+  }>({
+    isOpen: false,
+    action: 'edit',
+    categoryId: '',
+    categoryName: ''
+  });
+  
+  // Password Expiry Config State
+  const [passwordExpiryConfig, setPasswordExpiryConfig] = useState<PasswordExpiryConfig>({
+    value: 1,
+    unit: 'week'
+  });
+  
   // --- Helpers & Sync Logic ---
 
   const loadFromLocal = () => {
@@ -214,6 +233,17 @@ function App() {
         });
 
         if (response.status === 401) {
+            // 检查是否是密码过期
+            try {
+                const errorData = await response.json();
+                if (errorData.error && errorData.error.includes('过期')) {
+                    alert('您的密码已过期，请重新登录');
+                }
+            } catch (e) {
+                // 如果无法解析错误信息，使用默认提示
+                console.error('Failed to parse error response', e);
+            }
+            
             setAuthToken('');
             localStorage.removeItem(AUTH_KEY);
             setIsAuthOpen(true);
@@ -484,7 +514,9 @@ function App() {
         // 获取数据
         let hasCloudData = false;
         try {
-            const res = await fetch('/api/storage');
+            const res = await fetch('/api/storage', {
+                headers: authToken ? { 'x-auth-password': authToken } : {}
+            });
             if (res.ok) {
                 const data = await res.json();
                 if (data.links && data.links.length > 0) {
@@ -496,24 +528,47 @@ function App() {
                     loadLinkIcons(data.links);
                     hasCloudData = true;
                 }
-            } 
+            } else if (res.status === 401) {
+                // 如果返回401，可能是密码过期，清除本地token并要求重新登录
+                const errorData = await res.json();
+                if (errorData.error && errorData.error.includes('过期')) {
+                    setAuthToken(null);
+                    localStorage.removeItem(AUTH_KEY);
+                    setIsAuthOpen(true);
+                    setIsCheckingAuth(false);
+                    return;
+                }
+            }
         } catch (e) {
             console.warn("Failed to fetch from cloud, falling back to local.", e);
         }
         
-        // 无论是否有云端数据，都尝试从KV空间加载搜索配置
+        // 无论是否有云端数据，都尝试从KV空间加载搜索配置和网站配置
         try {
             const searchConfigRes = await fetch('/api/storage?getConfig=search');
             if (searchConfigRes.ok) {
                 const searchConfigData = await searchConfigRes.json();
-                if (searchConfigData && Object.keys(searchConfigData).length > 0) {
+                // 检查搜索配置是否有效（包含必要的字段）
+                if (searchConfigData && (searchConfigData.mode || searchConfigData.externalSources || searchConfigData.selectedSource)) {
                     setSearchMode(searchConfigData.mode || 'internal');
                     setExternalSearchSources(searchConfigData.externalSources || []);
-                    localStorage.setItem(SEARCH_CONFIG_KEY, JSON.stringify(searchConfigData));
+                    // 加载已保存的选中搜索源
+                    if (searchConfigData.selectedSource) {
+                        setSelectedSearchSource(searchConfigData.selectedSource);
+                    }
+                }
+            }
+            
+            // 获取网站配置（包括密码过期时间设置）
+            const websiteConfigRes = await fetch('/api/storage?getConfig=website');
+            if (websiteConfigRes.ok) {
+                const websiteConfigData = await websiteConfigRes.json();
+                if (websiteConfigData && websiteConfigData.passwordExpiry) {
+                    setPasswordExpiryConfig(websiteConfigData.passwordExpiry);
                 }
             }
         } catch (e) {
-            console.warn("Failed to fetch search config from KV.", e);
+            console.warn("Failed to fetch configs from KV.", e);
         }
         
         // 如果有云端数据，则不需要加载本地数据
@@ -525,276 +580,90 @@ function App() {
         // 如果没有云端数据，则加载本地数据
         loadFromLocal();
         
-        // 如果从KV空间加载搜索配置失败，回退到localStorage
-        try {
-            const saved = localStorage.getItem(SEARCH_CONFIG_KEY);
-            if (saved) {
-                const config = JSON.parse(saved);
-                setSearchMode(config.mode || 'internal');
-                
-                // 如果已保存的搜索源配置存在，直接使用
-                if (config.externalSources) {
-                    setExternalSearchSources(config.externalSources);
-                } else {
-                    // 如果没有外部搜索源配置，使用默认配置
-                    setExternalSearchSources([
-                        {
-                            id: 'bing',
-                            name: '必应',
-                            url: 'https://www.bing.com/search?q={query}',
-                            icon: 'Search',
-                            enabled: true,
-                            createdAt: Date.now()
-                        },
-                        {
-                            id: 'google',
-                            name: 'Google',
-                            url: 'https://www.google.com/search?q={query}',
-                            icon: 'Search',
-                            enabled: true,
-                            createdAt: Date.now()
-                        },
-                        {
-                            id: 'baidu',
-                            name: '百度',
-                            url: 'https://www.baidu.com/s?wd={query}',
-                            icon: 'Globe',
-                            enabled: true,
-                            createdAt: Date.now()
-                        },
-                        {
-                            id: 'sogou',
-                            name: '搜狗',
-                            url: 'https://www.sogou.com/web?query={query}',
-                            icon: 'Globe',
-                            enabled: true,
-                            createdAt: Date.now()
-                        },
-                        {
-                            id: 'yandex',
-                            name: 'Yandex',
-                            url: 'https://yandex.com/search/?text={query}',
-                            icon: 'Globe',
-                            enabled: true,
-                            createdAt: Date.now()
-                        },
-                        {
-                            id: 'github',
-                            name: 'GitHub',
-                            url: 'https://github.com/search?q={query}',
-                            icon: 'Github',
-                            enabled: true,
-                            createdAt: Date.now()
-                        },
-                        {
-                            id: 'linuxdo',
-                            name: 'Linux.do',
-                            url: 'https://linux.do/search?q={query}',
-                            icon: 'Terminal',
-                            enabled: true,
-                            createdAt: Date.now()
-                        },
-                        {
-                         id: 'bilibili',
-                         name: 'B站',
-                         url: 'https://search.bilibili.com/all?keyword={query}',
-                         icon: 'Play',
-                         enabled: true,
-                         createdAt: Date.now()
-                     },
-                        {
-                            id: 'youtube',
-                            name: 'YouTube',
-                            url: 'https://www.youtube.com/results?search_query={query}',
-                            icon: 'Video',
-                            enabled: true,
-                            createdAt: Date.now()
-                        },
-                        {
-                         id: 'wikipedia',
-                         name: '维基',
-                         url: 'https://zh.wikipedia.org/wiki/Special:Search?search={query}',
-                         icon: 'BookOpen',
-                         enabled: true,
-                         createdAt: Date.now()
-                     }
-                    ]);
-                }
-            } else {
-                // 如果没有保存的配置，使用默认配置
-                setSearchMode('internal');
-                setExternalSearchSources([
-                  {
-                        id: 'bing',
-                        name: '必应',
-                        url: 'https://www.bing.com/search?q={query}',
-                        icon: 'Search',
-                        enabled: true,
-                        createdAt: Date.now()
-                    },  
-                  {
-                        id: 'google',
-                        name: 'Google',
-                        url: 'https://www.google.com/search?q={query}',
-                        icon: 'Search',
-                        enabled: true,
-                        createdAt: Date.now()
-                    },
-                    
-                    {
-                        id: 'baidu',
-                        name: '百度',
-                        url: 'https://www.baidu.com/s?wd={query}',
-                        icon: 'Globe',
-                        enabled: true,
-                        createdAt: Date.now()
-                    },
-                    {
-                        id: 'sogou',
-                        name: '搜狗',
-                        url: 'https://www.sogou.com/web?query={query}',
-                        icon: 'Globe',
-                        enabled: true,
-                        createdAt: Date.now()
-                    },
-                    {
-                        id: 'yandex',
-                        name: 'Yandex',
-                        url: 'https://yandex.com/search/?text={query}',
-                        icon: 'Globe',
-                        enabled: true,
-                        createdAt: Date.now()
-                    },
-                    {
-                        id: 'github',
-                        name: 'GitHub',
-                        url: 'https://github.com/search?q={query}',
-                        icon: 'Github',
-                        enabled: true,
-                        createdAt: Date.now()
-                    },
-                    {
-                        id: 'linuxdo',
-                        name: 'Linux.do',
-                        url: 'https://linux.do/search?q={query}',
-                        icon: 'Terminal',
-                        enabled: true,
-                        createdAt: Date.now()
-                    },
-                    {
-                        id: 'bilibili',
-                        name: 'B站',
-                        url: 'https://search.bilibili.com/all?keyword={query}',
-                        icon: 'Play',
-                        enabled: true,
-                        createdAt: Date.now()
-                    },
-                    {
-                        id: 'youtube',
-                        name: 'YouTube',
-                        url: 'https://www.youtube.com/results?search_query={query}',
-                        icon: 'Video',
-                        enabled: true,
-                        createdAt: Date.now()
-                    },
-                    {
-                        id: 'wikipedia',
-                        name: '维基',
-                        url: 'https://zh.wikipedia.org/wiki/Special:Search?search={query}',
-                        icon: 'BookOpen',
-                        enabled: true,
-                        createdAt: Date.now()
-                    }
-                ]);
+        // 如果从KV空间加载搜索配置失败，直接使用默认配置（不使用localStorage回退）
+        setSearchMode('internal');
+        setExternalSearchSources([
+            {
+                id: 'bing',
+                name: '必应',
+                url: 'https://www.bing.com/search?q={query}',
+                icon: 'Search',
+                enabled: true,
+                createdAt: Date.now()
+            },
+            {
+                id: 'google',
+                name: 'Google',
+                url: 'https://www.google.com/search?q={query}',
+                icon: 'Search',
+                enabled: true,
+                createdAt: Date.now()
+            },
+            {
+                id: 'baidu',
+                name: '百度',
+                url: 'https://www.baidu.com/s?wd={query}',
+                icon: 'Globe',
+                enabled: true,
+                createdAt: Date.now()
+            },
+            {
+                id: 'sogou',
+                name: '搜狗',
+                url: 'https://www.sogou.com/web?query={query}',
+                icon: 'Globe',
+                enabled: true,
+                createdAt: Date.now()
+            },
+            {
+                id: 'yandex',
+                name: 'Yandex',
+                url: 'https://yandex.com/search/?text={query}',
+                icon: 'Globe',
+                enabled: true,
+                createdAt: Date.now()
+            },
+            {
+                id: 'github',
+                name: 'GitHub',
+                url: 'https://github.com/search?q={query}',
+                icon: 'Github',
+                enabled: true,
+                createdAt: Date.now()
+            },
+            {
+                id: 'linuxdo',
+                name: 'Linux.do',
+                url: 'https://linux.do/search?q={query}',
+                icon: 'Terminal',
+                enabled: true,
+                createdAt: Date.now()
+            },
+            {
+                id: 'bilibili',
+                name: 'B站',
+                url: 'https://search.bilibili.com/all?keyword={query}',
+                icon: 'Play',
+                enabled: true,
+                createdAt: Date.now()
+            },
+            {
+                id: 'youtube',
+                name: 'YouTube',
+                url: 'https://www.youtube.com/results?search_query={query}',
+                icon: 'Video',
+                enabled: true,
+                createdAt: Date.now()
+            },
+            {
+                id: 'wikipedia',
+                name: '维基',
+                url: 'https://zh.wikipedia.org/wiki/Special:Search?search={query}',
+                icon: 'BookOpen',
+                enabled: true,
+                createdAt: Date.now()
             }
-        } catch (e) {
-            console.warn("Failed to load search config from localStorage.", e);
-            // 如果加载失败，使用默认配置
-                setSearchMode('internal');
-                setExternalSearchSources([
-                  {
-                        id: 'bing',
-                        name: '必应',
-                        url: 'https://www.bing.com/search?q={query}',
-                        icon: 'Search',
-                        enabled: true,
-                        createdAt: Date.now()
-                    },  
-                  {
-                        id: 'google',
-                        name: 'Google',
-                        url: 'https://www.google.com/search?q={query}',
-                        icon: 'Search',
-                        enabled: true,
-                        createdAt: Date.now()
-                    },
-                    
-                    {
-                        id: 'baidu',
-                        name: '百度',
-                        url: 'https://www.baidu.com/s?wd={query}',
-                        icon: 'Globe',
-                        enabled: true,
-                        createdAt: Date.now()
-                    },
-                    {
-                        id: 'sogou',
-                        name: '搜狗',
-                        url: 'https://www.sogou.com/web?query={query}',
-                        icon: 'Globe',
-                        enabled: true,
-                        createdAt: Date.now()
-                    },
-                    {
-                        id: 'yandex',
-                        name: 'Yandex',
-                        url: 'https://yandex.com/search/?text={query}',
-                        icon: 'Globe',
-                        enabled: true,
-                        createdAt: Date.now()
-                    },
-                    {
-                        id: 'github',
-                        name: 'GitHub',
-                        url: 'https://github.com/search?q={query}',
-                        icon: 'Github',
-                        enabled: true,
-                        createdAt: Date.now()
-                    },
-                    {
-                        id: 'linuxdo',
-                        name: 'Linux.do',
-                        url: 'https://linux.do/search?q={query}',
-                        icon: 'Terminal',
-                        enabled: true,
-                        createdAt: Date.now()
-                    },
-                    {
-                        id: 'bilibili',
-                        name: 'B站',
-                        url: 'https://search.bilibili.com/all?keyword={query}',
-                        icon: 'Play',
-                        enabled: true,
-                        createdAt: Date.now()
-                    },
-                    {
-                        id: 'youtube',
-                        name: 'YouTube',
-                        url: 'https://www.youtube.com/results?search_query={query}',
-                        icon: 'Video',
-                        enabled: true,
-                        createdAt: Date.now()
-                    },
-                    {
-                        id: 'wikipedia',
-                        name: '维基',
-                        url: 'https://zh.wikipedia.org/wiki/Special:Search?search={query}',
-                        icon: 'BookOpen',
-                        enabled: true,
-                        createdAt: Date.now()
-                    }
-                ]);
-        }
+        ]);
         
         setIsLoadingSearchConfig(false);
         setIsCheckingAuth(false);
@@ -923,6 +792,55 @@ function App() {
             setIsAuthOpen(false);
             setSyncStatus('saved');
             
+            // 登录成功后，获取网站配置（包括密码过期时间设置）
+            let passwordExpirySettings: PasswordExpiryConfig = { value: 1, unit: 'week' }; // 默认值
+            try {
+                const websiteConfigRes = await fetch('/api/storage?getConfig=website');
+                if (websiteConfigRes.ok) {
+                    const websiteConfigData = await websiteConfigRes.json();
+                    if (websiteConfigData && websiteConfigData.passwordExpiry) {
+                        passwordExpirySettings = websiteConfigData.passwordExpiry;
+                        setPasswordExpiryConfig(passwordExpirySettings);
+                    }
+                }
+            } catch (e) {
+                console.warn("Failed to fetch website config after login.", e);
+            }
+            
+            // 检查密码是否过期
+            const lastLoginTime = localStorage.getItem('lastLoginTime');
+            const currentTime = Date.now();
+            
+            if (lastLoginTime) {
+                const lastLogin = parseInt(lastLoginTime);
+                const timeDiff = currentTime - lastLogin;
+                
+                // 计算过期时间（毫秒）
+                let expiryTimeMs = 0;
+                if (passwordExpirySettings.unit === 'day') {
+                    expiryTimeMs = passwordExpirySettings.value * 24 * 60 * 60 * 1000;
+                } else if (passwordExpirySettings.unit === 'week') {
+                    expiryTimeMs = passwordExpirySettings.value * 7 * 24 * 60 * 60 * 1000;
+                } else if (passwordExpirySettings.unit === 'month') {
+                    expiryTimeMs = passwordExpirySettings.value * 30 * 24 * 60 * 60 * 1000;
+                } else if (passwordExpirySettings.unit === 'year') {
+                    expiryTimeMs = passwordExpirySettings.value * 365 * 24 * 60 * 60 * 1000;
+                }
+                
+                // 如果设置了过期时间且已过期
+                if (expiryTimeMs > 0 && timeDiff > expiryTimeMs) {
+                    // 密码已过期，清除认证信息并提示用户
+                    setAuthToken(null);
+                    localStorage.removeItem(AUTH_KEY);
+                    setIsAuthOpen(true);
+                    alert('您的密码已过期，请重新登录');
+                    return false;
+                }
+            }
+            
+            // 更新最后登录时间
+            localStorage.setItem('lastLoginTime', currentTime.toString());
+            
             // 登录成功后，从服务器获取数据
             try {
                 const res = await fetch('/api/storage');
@@ -981,6 +899,46 @@ function App() {
       setSyncStatus('offline');
       // 退出后重新加载本地数据
       loadFromLocal();
+  };
+
+  // 分类操作密码验证处理函数
+  const handleCategoryActionAuth = async (password: string): Promise<boolean> => {
+    try {
+      // 验证密码
+      const authResponse = await fetch('/api/storage', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-auth-password': password
+        },
+        body: JSON.stringify({ authOnly: true })
+      });
+      
+      return authResponse.ok;
+    } catch (error) {
+      console.error('Category action auth error:', error);
+      return false;
+    }
+  };
+
+  // 打开分类操作验证弹窗
+  const openCategoryActionAuth = (action: 'edit' | 'delete', categoryId: string, categoryName: string) => {
+    setCategoryActionAuth({
+      isOpen: true,
+      action,
+      categoryId,
+      categoryName
+    });
+  };
+
+  // 关闭分类操作验证弹窗
+  const closeCategoryActionAuth = () => {
+    setCategoryActionAuth({
+      isOpen: false,
+      action: 'edit',
+      categoryId: '',
+      categoryName: ''
+    });
   };
 
   const handleImportConfirm = (newLinks: LinkItem[], newCategories: Category[]) => {
@@ -1242,6 +1200,35 @@ function App() {
       updateData(updated, categories);
   };
 
+  const handleSavePasswordExpiryConfig = async (config: PasswordExpiryConfig) => {
+    setPasswordExpiryConfig(config);
+    
+    // 保存到云端
+    if (authToken) {
+      try {
+        const response = await fetch('/api/storage', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-auth-password': authToken
+          },
+          body: JSON.stringify({
+            saveConfig: 'website',
+            config: {
+              passwordExpiry: config
+            }
+          })
+        });
+        
+        if (!response.ok) {
+          console.error('Failed to save password expiry config');
+        }
+      } catch (error) {
+        console.error('Error saving password expiry config:', error);
+      }
+    }
+  };
+
   const handleSaveAIConfig = async (config: AIConfig) => {
       setAiConfig(config);
       localStorage.setItem(AI_CONFIG_KEY, JSON.stringify(config));
@@ -1390,9 +1377,12 @@ function App() {
   }, [isIconHovered, isPopupHovered]);
 
   // 处理搜索源选择
-  const handleSearchSourceSelect = (source: ExternalSearchSource) => {
+  const handleSearchSourceSelect = async (source: ExternalSearchSource) => {
     // 更新选中的搜索源
     setSelectedSearchSource(source);
+    
+    // 保存选中的搜索源到KV空间
+    await handleSaveSearchConfig(externalSearchSources, searchMode, source);
     
     if (searchQuery.trim()) {
       const searchUrl = source.url.replace('{query}', encodeURIComponent(searchQuery));
@@ -1403,37 +1393,44 @@ function App() {
   };
 
   // --- Search Config ---
-  const handleSaveSearchConfig = async (sources: ExternalSearchSource[], mode: SearchMode) => {
+  const handleSaveSearchConfig = async (sources: ExternalSearchSource[], mode: SearchMode, selectedSource?: ExternalSearchSource | null) => {
       const searchConfig: SearchConfig = {
           mode,
-          externalSources: sources
+          externalSources: sources,
+          selectedSource: selectedSource !== undefined ? selectedSource : selectedSearchSource
       };
       
       setExternalSearchSources(sources);
       setSearchMode(mode);
-      localStorage.setItem(SEARCH_CONFIG_KEY, JSON.stringify(searchConfig));
+      if (selectedSource !== undefined) {
+          setSelectedSearchSource(selectedSource);
+      }
       
-      // 同时保存到KV空间
-      if (authToken) {
-          try {
-              const response = await fetch('/api/storage', {
-                  method: 'POST',
-                  headers: {
-                      'Content-Type': 'application/json',
-                      'x-auth-password': authToken
-                  },
-                  body: JSON.stringify({
-                      saveConfig: 'search',
-                      config: searchConfig
-                  })
-              });
-              
-              if (!response.ok) {
-                  console.error('Failed to save search config to KV:', response.statusText);
-              }
-          } catch (error) {
-              console.error('Error saving search config to KV:', error);
+      // 只保存到KV空间（搜索配置允许无密码访问）
+      try {
+          const headers: Record<string, string> = {
+              'Content-Type': 'application/json'
+          };
+          
+          // 如果有认证令牌，添加认证头
+          if (authToken) {
+              headers['x-auth-password'] = authToken;
           }
+          
+          const response = await fetch('/api/storage', {
+              method: 'POST',
+              headers: headers,
+              body: JSON.stringify({
+                  saveConfig: 'search',
+                  config: searchConfig
+              })
+          });
+          
+          if (!response.ok) {
+              console.error('Failed to save search config to KV:', response.statusText);
+          }
+      } catch (error) {
+          console.error('Error saving search config to KV:', error);
       }
   };
 
@@ -1936,6 +1933,7 @@ function App() {
         categories={categories}
         onUpdateCategories={handleUpdateCategories}
         onDeleteCategory={handleDeleteCategory}
+        onVerifyPassword={handleCategoryActionAuth}
       />
 
       <BackupModal
@@ -1969,6 +1967,8 @@ function App() {
         onSave={handleSaveAIConfig}
         links={links}
         onUpdateLinks={(newLinks) => updateData(newLinks, categories)}
+        passwordExpiryConfig={passwordExpiryConfig}
+        onSavePasswordExpiry={handleSavePasswordExpiryConfig}
       />
 
       <SearchConfigModal
@@ -2096,7 +2096,7 @@ function App() {
                  title="Fork this project on GitHub"
                >
                  <GitFork size={14} />
-                 <span>Fork 项目 v1.5.1</span>
+                 <span>Fork 项目 v1.6</span>
                </a>
             </div>
         </div>

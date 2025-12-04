@@ -3,6 +3,7 @@ import { X, ArrowUp, ArrowDown, Trash2, Edit2, Plus, Check, Lock, Unlock, Palett
 import { Category } from '../types';
 import Icon from './Icon';
 import IconSelector from './IconSelector';
+import CategoryActionAuthModal from './CategoryActionAuthModal';
 
 interface CategoryManagerModalProps {
   isOpen: boolean;
@@ -10,6 +11,7 @@ interface CategoryManagerModalProps {
   categories: Category[];
   onUpdateCategories: (newCategories: Category[]) => void;
   onDeleteCategory: (id: string) => void;
+  onVerifyPassword?: (password: string) => Promise<boolean>;
 }
 
 const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({ 
@@ -17,7 +19,8 @@ const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
   onClose, 
   categories, 
   onUpdateCategories,
-  onDeleteCategory
+  onDeleteCategory,
+  onVerifyPassword
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -30,20 +33,18 @@ const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
   
   const [isIconSelectorOpen, setIsIconSelectorOpen] = useState(false);
   const [iconSelectorTarget, setIconSelectorTarget] = useState<'edit' | 'new' | null>(null);
+  
+  // 分类操作验证相关状态
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<{
+    type: 'edit' | 'delete';
+    categoryId: string;
+    categoryName: string;
+  } | null>(null);
 
   if (!isOpen) return null;
 
   const handleMove = (index: number, direction: 'up' | 'down') => {
-    // 防止移动"常用推荐"分类
-    if (categories[index].id === 'common') {
-      return;
-    }
-    
-    // 防止将其他分类移动到"常用推荐"分类之上
-    if (direction === 'up' && index > 0 && categories[index - 1].id === 'common') {
-      return;
-    }
-    
     const newCats = [...categories];
     if (direction === 'up' && index > 0) {
       [newCats[index], newCats[index - 1]] = [newCats[index - 1], newCats[index]];
@@ -51,6 +52,85 @@ const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
       [newCats[index], newCats[index + 1]] = [newCats[index + 1], newCats[index]];
     }
     onUpdateCategories(newCats);
+  };
+
+  // 处理密码验证
+  const handlePasswordVerification = async (password: string): Promise<boolean> => {
+    if (!onVerifyPassword) return true; // 如果没有提供验证函数，默认通过
+    
+    try {
+      const isValid = await onVerifyPassword(password);
+      return isValid;
+    } catch (error) {
+      console.error('Password verification error:', error);
+      return false;
+    }
+  };
+
+  // 处理编辑分类前的验证
+  const handleStartEdit = (cat: Category) => {
+    if (!onVerifyPassword) {
+      // 如果没有提供验证函数，直接编辑
+      startEdit(cat);
+      return;
+    }
+
+    // 设置待处理的操作
+    setPendingAction({
+      type: 'edit',
+      categoryId: cat.id,
+      categoryName: cat.name
+    });
+    
+    // 打开验证弹窗
+    setIsAuthModalOpen(true);
+  };
+
+  // 处理删除分类前的验证
+  const handleDeleteClick = (cat: Category) => {
+    if (!onVerifyPassword) {
+      // 如果没有提供验证函数，直接删除
+      if (confirm(`确定删除"${cat.name}"分类吗？该分类下的书签将移动到"常用推荐"。`)) {
+        onDeleteCategory(cat.id);
+      }
+      return;
+    }
+
+    // 设置待处理的操作
+    setPendingAction({
+      type: 'delete',
+      categoryId: cat.id,
+      categoryName: cat.name
+    });
+    
+    // 打开验证弹窗
+    setIsAuthModalOpen(true);
+  };
+
+  // 处理验证成功后的操作
+  const handleAuthSuccess = () => {
+    if (!pendingAction) return;
+
+    if (pendingAction.type === 'edit') {
+      const cat = categories.find(c => c.id === pendingAction.categoryId);
+      if (cat) {
+        startEdit(cat);
+      }
+    } else if (pendingAction.type === 'delete') {
+      const cat = categories.find(c => c.id === pendingAction.categoryId);
+      if (cat && confirm(`确定删除"${cat.name}"分类吗？该分类下的书签将移动到"常用推荐"。`)) {
+        onDeleteCategory(cat.id);
+      }
+    }
+
+    // 清除待处理的操作
+    setPendingAction(null);
+  };
+
+  // 处理验证弹窗关闭
+  const handleAuthModalClose = () => {
+    setIsAuthModalOpen(false);
+    setPendingAction(null);
   };
 
   const startEdit = (cat: Category) => {
@@ -128,14 +208,14 @@ const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
                   <div className="flex flex-col gap-1 mr-2">
                     <button 
                       onClick={() => handleMove(index, 'up')}
-                      disabled={index === 0 || cat.id === 'common'}
+                      disabled={index === 0}
                       className="p-0.5 text-slate-400 hover:text-blue-500 disabled:opacity-30"
                     >
                       <ArrowUp size={14} />
                     </button>
                     <button 
                       onClick={() => handleMove(index, 'down')}
-                      disabled={index === categories.length - 1 || cat.id === 'common'}
+                      disabled={index === categories.length - 1}
                       className="p-0.5 text-slate-400 hover:text-blue-500 disabled:opacity-30"
                     >
                       <ArrowDown size={14} />
@@ -198,14 +278,14 @@ const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
                     ) : (
                        <>
                         {cat.id !== 'common' && (
-                          <button onClick={() => startEdit(cat)} className="p-1.5 text-slate-400 hover:text-blue-500 hover:bg-slate-200 dark:hover:bg-slate-600 rounded">
+                          <button onClick={() => handleStartEdit(cat)} className="p-1.5 text-slate-400 hover:text-blue-500 hover:bg-slate-200 dark:hover:bg-slate-600 rounded">
                               <Edit2 size={14} />
                           </button>
                         )}
                         {/* 只有非"常用推荐"分类才显示删除按钮 */}
                         {cat.id !== 'common' && (
                             <button 
-                            onClick={() => { if(confirm(`确定删除"${cat.name}"分类吗？该分类下的书签将移动到"常用推荐"。`)) onDeleteCategory(cat.id); }}
+                            onClick={() => handleDeleteClick(cat)}
                             className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-slate-200 dark:hover:bg-slate-600 rounded"
                             >
                             <Trash2 size={14} />
@@ -293,6 +373,18 @@ const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
                 </div>
               </div>
             </div>
+          )}
+          
+          {/* 分类操作密码验证弹窗 */}
+          {isAuthModalOpen && pendingAction && (
+            <CategoryActionAuthModal
+              isOpen={isAuthModalOpen}
+              onClose={handleAuthModalClose}
+              onVerify={handlePasswordVerification}
+              onVerified={handleAuthSuccess}
+              actionType={pendingAction.type}
+              categoryName={pendingAction.categoryName}
+            />
           )}
         </div>
       </div>
