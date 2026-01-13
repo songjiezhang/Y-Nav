@@ -89,10 +89,10 @@ const Sidebar: React.FC<SidebarProps> = ({
           {isSidebarCollapsed ? (
             <button
               onClick={onToggleCollapsed}
-              className="h-9 w-9 rounded-xl bg-slate-100/50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-white/5 flex items-center justify-center text-sm font-mono text-slate-500 dark:text-slate-400 hover:text-accent hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer shadow-sm hover:shadow-md hover:scale-105 active:scale-95"
+              className="h-9 w-9 rounded-xl bg-white/50 dark:bg-slate-800/50 border border-slate-200/60 dark:border-white/10 flex items-center justify-center transition-all cursor-pointer shadow-sm hover:shadow-lg hover:shadow-accent/20 hover:border-accent/30 hover:bg-white dark:hover:bg-slate-800 hover:scale-105 active:scale-95 group"
               title="展开侧边栏"
             >
-              Y
+              <span className="font-mono font-black text-xl text-slate-700 dark:text-slate-200 group-hover:text-accent transition-colors duration-300">Y</span>
             </button>
           ) : (
             <div className="relative flex items-center justify-center font-mono font-bold text-lg cursor-pointer select-none group" title={navTitleText}>
