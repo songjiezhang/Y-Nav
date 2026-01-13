@@ -183,7 +183,9 @@ function App() {
     showQRCode,
     editLinkFromContextMenu,
     deleteLinkFromContextMenu,
-    togglePinFromContextMenu
+    togglePinFromContextMenu,
+    duplicateLinkFromContextMenu,
+    moveLinkFromContextMenu
   } = useContextMenu({
     links,
     categories,
@@ -508,10 +510,13 @@ function App() {
       <ContextMenu
         isOpen={contextMenu.isOpen}
         position={contextMenu.position}
+        categories={categories}
         onClose={closeContextMenu}
         onCopyLink={copyLinkToClipboard}
         onShowQRCode={showQRCode}
         onEditLink={editLinkFromContextMenu}
+        onDuplicateLink={duplicateLinkFromContextMenu}
+        onMoveLink={moveLinkFromContextMenu}
         onDeleteLink={deleteLinkFromContextMenu}
         onTogglePin={togglePinFromContextMenu}
       />

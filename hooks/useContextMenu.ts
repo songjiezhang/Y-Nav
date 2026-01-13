@@ -111,6 +111,29 @@ export function useContextMenu({
         closeContextMenu();
     }, [contextMenu.link, links, categories, updateData, closeContextMenu]);
 
+    const duplicateLinkFromContextMenu = useCallback(() => {
+        if (!contextMenu.link) return;
+        const newLink: LinkItem = {
+            ...contextMenu.link,
+            id: Date.now().toString(),
+            createdAt: Date.now(),
+            title: `${contextMenu.link.title} (副本)`,
+            pinned: false, // Default to unpinned for duplicate? Or copy state? Let's unpin to be safe/clean.
+        };
+        const updatedLinks = [...links, newLink];
+        updateData(updatedLinks, categories);
+        closeContextMenu();
+    }, [contextMenu.link, links, categories, updateData, closeContextMenu]);
+
+    const moveLinkFromContextMenu = useCallback((targetCategoryId: string) => {
+        if (!contextMenu.link) return;
+        const updatedLinks = links.map(l =>
+            l.id === contextMenu.link!.id ? { ...l, categoryId: targetCategoryId } : l
+        );
+        updateData(updatedLinks, categories);
+        closeContextMenu();
+    }, [contextMenu.link, links, categories, updateData, closeContextMenu]);
+
     return {
         contextMenu,
         handleContextMenu,
@@ -119,6 +142,8 @@ export function useContextMenu({
         showQRCode,
         editLinkFromContextMenu,
         deleteLinkFromContextMenu,
-        togglePinFromContextMenu
+        togglePinFromContextMenu,
+        duplicateLinkFromContextMenu,
+        moveLinkFromContextMenu
     };
 }
