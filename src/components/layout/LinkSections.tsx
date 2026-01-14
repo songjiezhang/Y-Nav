@@ -125,17 +125,6 @@ const LinkSections: React.FC<LinkSectionsProps> = ({
           </div>
         )}
 
-        {!showPinnedSection && !showMainSection && (
-          <div className="flex justify-center pt-12">
-            <button
-              onClick={onAddLink}
-              className="group flex items-center gap-2 px-6 py-3 rounded-full text-sm font-semibold text-white bg-gradient-to-r from-accent to-purple-600 hover:from-accent/90 hover:to-purple-700 shadow-lg shadow-accent/20 hover:shadow-accent/30 active:scale-95 transition-all duration-300"
-            >
-              <span className="text-lg leading-none group-hover:rotate-90 transition-transform duration-300">+</span> 添加网址
-            </button>
-          </div>
-        )}
-
         {/* Pinned Section */}
         {showPinnedSection && (
           <section className="pt-6">
