@@ -81,6 +81,10 @@ function App() {
   const [currentConflict, setCurrentConflict] = useState<SyncConflict | null>(null);
   const hasInitialSyncRun = useRef(false);
   const autoUnlockAttemptedRef = useRef(false);
+  const syncPasswordRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncPasswordRefreshIdRef = useRef(0);
+  const lastSyncPasswordRef = useRef((localStorage.getItem(SYNC_PASSWORD_KEY) || '').trim());
+  const isSyncPasswordRefreshingRef = useRef(false);
   const getLocalSyncMeta = useCallback(() => {
     const stored = localStorage.getItem(SYNC_META_KEY);
     if (!stored) return null;
@@ -184,7 +188,8 @@ function App() {
     createBackup,
     restoreBackup,
     deleteBackup,
-    resolveConflict: resolveSyncConflict
+    resolveConflict: resolveSyncConflict,
+    cancelPendingSync
   } = useSyncEngine({
     onConflict: handleSyncConflict,
     onSyncComplete: handleSyncComplete,
@@ -853,6 +858,7 @@ function App() {
   useEffect(() => {
     // 跳过初始加载阶段
     if (!isLoaded || !hasInitialSyncRun.current || currentConflict) return;
+    if (isSyncPasswordRefreshingRef.current) return;
 
     const syncData = buildSyncData(
       links,
@@ -937,6 +943,44 @@ function App() {
       handleSyncComplete(cloudData);
     }
   }, [pullFromCloud, handleSyncComplete, getLocalSyncMeta, links, categories, searchMode, externalSearchSources, aiConfig, siteSettings, privateVaultCipher, buildSyncData, handleSyncConflict]);
+
+  const handleSyncPasswordChange = useCallback((nextPassword: string) => {
+    const trimmed = nextPassword.trim();
+    if (trimmed === lastSyncPasswordRef.current) return;
+    lastSyncPasswordRef.current = trimmed;
+
+    if (syncPasswordRefreshTimerRef.current) {
+      clearTimeout(syncPasswordRefreshTimerRef.current);
+      syncPasswordRefreshTimerRef.current = null;
+    }
+
+    if (!trimmed) {
+      isSyncPasswordRefreshingRef.current = false;
+      return;
+    }
+
+    cancelPendingSync();
+    isSyncPasswordRefreshingRef.current = true;
+    syncPasswordRefreshIdRef.current += 1;
+    const refreshId = syncPasswordRefreshIdRef.current;
+    syncPasswordRefreshTimerRef.current = setTimeout(() => {
+      syncPasswordRefreshTimerRef.current = null;
+      handleManualPull()
+        .finally(() => {
+          if (syncPasswordRefreshIdRef.current === refreshId) {
+            isSyncPasswordRefreshingRef.current = false;
+          }
+        });
+    }, 600);
+  }, [cancelPendingSync, handleManualPull]);
+
+  useEffect(() => {
+    return () => {
+      if (syncPasswordRefreshTimerRef.current) {
+        clearTimeout(syncPasswordRefreshTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleRestoreBackup = useCallback(async (backupKey: string) => {
     const confirmed = await confirm({
@@ -1024,6 +1068,7 @@ function App() {
           onCreateBackup={handleCreateBackup}
           onRestoreBackup={handleRestoreBackup}
           onDeleteBackup={handleDeleteBackup}
+          onSyncPasswordChange={handleSyncPasswordChange}
           useSeparatePrivacyPassword={useSeparatePrivacyPassword}
           onMigratePrivacyMode={handleMigratePrivacyMode}
           privacyGroupEnabled={privacyGroupEnabled}

@@ -8,6 +8,7 @@ interface DataTabProps {
     onCreateBackup: () => Promise<boolean>;
     onRestoreBackup: (backupKey: string) => Promise<boolean>;
     onDeleteBackup: (backupKey: string) => Promise<boolean>;
+    onSyncPasswordChange: (password: string) => void;
     useSeparatePrivacyPassword: boolean;
     onMigratePrivacyMode: (payload: { useSeparatePassword: boolean; oldPassword: string; newPassword: string }) => Promise<boolean>;
     privacyGroupEnabled: boolean;
@@ -33,6 +34,7 @@ const DataTab: React.FC<DataTabProps> = ({
     onCreateBackup,
     onRestoreBackup,
     onDeleteBackup,
+    onSyncPasswordChange,
     useSeparatePrivacyPassword,
     onMigratePrivacyMode,
     privacyGroupEnabled,
@@ -65,6 +67,7 @@ const DataTab: React.FC<DataTabProps> = ({
         const newVal = e.target.value;
         setPassword(newVal);
         localStorage.setItem(SYNC_PASSWORD_KEY, newVal);
+        onSyncPasswordChange(newVal);
     };
 
     const getAuthHeaders = useCallback(() => {
